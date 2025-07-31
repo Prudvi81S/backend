@@ -27,13 +27,12 @@ pipeline {
                 sh "npm install"
             }
         }
-        stage('Deploy') {
-            when {
-                expression { env.GIT_BRANCH != 'origin/main' }
-            }
+        stage('Docker build') {
             steps {
-                sh "echo This is Deploy"
-                //error 'pipeline faild'
+                sh """
+                docker build -t prudvi81s/backend:${appVersion}
+                docker images
+                """
             }
         }
          stage('Print Params'){
