@@ -3,15 +3,23 @@ pipeline {
         label 'AGENT-1'
     }
     options{
-        timeout(time: 10, unit: 'MINUTES')
+        timeout(time: 30, unit: 'MINUTES')
         disableConcurrentBuilds()
         //retry(1)
     }
+    parameters{
+        booleanParam(name: 'deploy', defaultValue: false, description: 'Select to deploy or not')
+    }
     environment {
         DEBUG = 'true'
-        appVersion = ''
+        appVersion = '' // this will become global, we can use across pipeline
+        region = 'us-east-1'
+        account_id = '017006056117'
+        project = 'expense'
+        environment = 'dev'
+        component = 'backend'
     }
-   
+
     stages {
         stage('Read the version') {
             steps {
@@ -27,15 +35,53 @@ pipeline {
                 sh 'npm install'
             }
         }
-        stage('Docker build') {
+        /* stage('SonarQube analysis') {
+            environment {
+                SCANNER_HOME = tool 'sonar-6.0' //scanner config
+            }
             steps {
-                sh """
-                docker build -t prudvi81s/backend:${appVersion} .
-                docker images
-                """
+                // sonar server injection
+                withSonarQubeEnv('sonar-6.0') {
+                    sh '$SCANNER_HOME/bin/sonar-scanner'
+                    //generic scanner, it automatically understands the language and provide scan results
+                }
             }
         }
 
+        stage('SQuality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        } */
+        stage('Docker build') {
+            
+            steps {
+                withAWS(region: 'us-east-1', credentials: 'aws-creds') {
+                    sh """
+                    aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${account_id}.dkr.ecr.us-east-1.amazonaws.com
+
+                    docker build -t ${account_id}.dkr.ecr.us-east-1.amazonaws.com/${project}/${environment}/${component}:${appVersion} .
+
+                    docker images
+
+                    docker push ${account_id}.dkr.ecr.us-east-1.amazonaws.com/${project}/${environment}/${component}:${appVersion}
+                    """
+                }
+            }
+        }
+        stage('Deploy'){
+            when {
+                expression { params.deploy }
+            }
+            steps{
+                build job: 'backend-cd', parameters: [
+                    string(name: 'version', value: "$appVersion"),
+                    string(name: 'ENVIRONMENT', value: "dev"),
+                ], wait: true
+            }
+        }
     }
 
     post {
